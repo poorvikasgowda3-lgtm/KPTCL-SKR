@@ -12,7 +12,48 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 from dotenv import load_dotenv
 
 
-load_dotenv(Path(__file__).resolve().parent / ".env")
+def _usable_api_key(value: Any) -> str:
+    if not value or not isinstance(value, str):
+        return ""
+    key = value.strip().strip("'\"").strip()
+    placeholder = key.casefold()
+    if (
+        not key
+        or placeholder in {
+            "your_api_key",
+            "your-gemini-api-key",
+            "your_gemini_api_key",
+            "changeme",
+            "placeholder",
+            "none",
+            "null",
+            "undefined",
+            "replace_with_your_api_key",
+            "replace_with_your_key",
+        }
+        or placeholder.startswith("replace_with_")
+        or placeholder.startswith("your_")
+        or (placeholder.startswith("<") and placeholder.endswith(">"))
+    ):
+        return ""
+    return key
+
+
+def _load_env() -> None:
+    """Load project-root .env securely relative to this file."""
+    base_dir = Path(__file__).resolve().parent
+    candidates = [
+        base_dir / ".env",
+        base_dir.parent / ".env",
+    ]
+    for env_path in candidates:
+        if env_path.is_file():
+            load_dotenv(dotenv_path=env_path, override=True)
+            if _usable_api_key(os.environ.get("GEMINI_API_KEY", "")):
+                break
+
+
+_load_env()
 
 
 class OCRConfigurationError(RuntimeError):
@@ -23,18 +64,6 @@ class OCRError(RuntimeError):
     """Raised when image extraction fails."""
 
 
-def _usable_api_key(value: str) -> str:
-    key = value.strip()
-    placeholder = key.casefold()
-    if (
-        not key
-        or placeholder in {"your_api_key", "your-gemini-api-key", "changeme", "placeholder"}
-        or placeholder.startswith("replace_with_")
-    ):
-        return ""
-    return key
-
-
 def _api_key() -> str:
     key = _usable_api_key(os.environ.get("GEMINI_API_KEY", ""))
     if not key:
@@ -42,7 +71,7 @@ def _api_key() -> str:
             import streamlit as st
 
             key = _usable_api_key(str(st.secrets.get("GEMINI_API_KEY", "")))
-        except (ImportError, FileNotFoundError, KeyError):
+        except (ImportError, FileNotFoundError, KeyError, AttributeError):
             key = ""
     return key
 
@@ -176,10 +205,11 @@ Set a nil flag true only when the notebook explicitly states Nil/no interruption
 Keep notebook duration separate exactly as written. Include all legible transformers; never assume there are three.
 Mark uncertain readings in uncertain_fields. Do not infer a date from today's date. Return JSON only.
 """
+    model_name = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
     try:
         client = genai.Client(api_key=api_key)
         response = client.models.generate_content(
-            model=os.environ.get("GEMINI_MODEL", "gemini-2.5-flash"),
+            model=model_name,
             contents=[
                 prompt,
                 types.Part.from_bytes(data=image_buffer.getvalue(), mime_type="image/png"),
@@ -188,7 +218,15 @@ Mark uncertain readings in uncertain_fields. Do not infer a date from today's da
         )
         if not response.text:
             raise OCRError("The vision provider returned an empty response.")
-        parsed = json.loads(response.text)
+        raw_text = response.text.strip()
+        if raw_text.startswith("```"):
+            lines = raw_text.splitlines()
+            if lines and lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].startswith("```"):
+                lines = lines[:-1]
+            raw_text = "\n".join(lines).strip()
+        parsed = json.loads(raw_text)
         if not isinstance(parsed, dict):
             raise OCRError("The vision provider returned an unexpected response format.")
         return _normalize_result(parsed)
@@ -197,14 +235,17 @@ Mark uncertain readings in uncertain_fields. Do not infer a date from today's da
     except json.JSONDecodeError as exc:
         raise OCRError("The vision provider response could not be read. Try reprocessing the photo.") from exc
     except errors.APIError as exc:
-        if exc.code in (401, 403):
+        code = getattr(exc, "code", None)
+        if code in (401, 403):
             message = "Gemini rejected the API credentials or access. Check GEMINI_API_KEY and that the selected model is enabled."
-        elif exc.code == 429:
+        elif code == 404:
+            message = f"The selected Gemini model ('{model_name}') was not found or is unavailable for this API key. Set GEMINI_MODEL in .env to an available model."
+        elif code == 429:
             message = "Gemini rate or quota limit reached. Check the project's usage limits, then retry later."
-        elif exc.code >= 500:
+        elif code is not None and code >= 500:
             message = "Gemini is temporarily unavailable. Wait a moment and retry."
         else:
-            message = f"Gemini rejected the extraction request (HTTP {exc.code}). Check the model configuration and try another clear image."
+            message = f"Gemini rejected the extraction request (HTTP {code}). Check the model configuration and try another clear image."
         raise OCRError(message) from exc
     except Exception as exc:
         raise OCRError(

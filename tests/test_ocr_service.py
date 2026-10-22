@@ -95,6 +95,7 @@ class OCRServiceTests(unittest.TestCase):
     def test_invalid_credentials_and_provider_outage_have_actionable_errors(self):
         cases = (
             (errors.ClientError, 403, "rejected the API credentials"),
+            (errors.ClientError, 404, "not found or is unavailable"),
             (errors.ServerError, 503, "temporarily unavailable"),
         )
         for error_type, status, expected in cases:
@@ -109,6 +110,37 @@ class OCRServiceTests(unittest.TestCase):
                     )
                     with self.assertRaisesRegex(ocr_service.OCRError, expected):
                         ocr_service.extract_readings(self.image_bytes)
+
+    def test_usable_api_key_detects_placeholders_and_formatting(self):
+        invalid_keys = [
+            "",
+            "   ",
+            "replace_with_your_api_key",
+            '"replace_with_your_api_key"',
+            "'your-gemini-api-key'",
+            "YOUR_API_KEY",
+            "<your_api_key>",
+            "changeme",
+            "none",
+            "null",
+        ]
+        for key in invalid_keys:
+            with self.subTest(key=key):
+                self.assertEqual(ocr_service._usable_api_key(key), "")
+        self.assertEqual(ocr_service._usable_api_key("  valid_key_123  "), "valid_key_123")
+        self.assertEqual(ocr_service._usable_api_key('"valid_key_456"'), "valid_key_456")
+
+    def test_extract_handles_markdown_fenced_json(self):
+        fenced = f"```json\n{json.dumps(self.payload)}\n```"
+        response = type("Response", (), {"text": fenced})()
+        with (
+            patch.object(ocr_service, "_api_key", return_value="test-key"),
+            patch.object(ocr_service, "preprocess_image", return_value=Image.new("RGB", (80, 80), "white")),
+            patch.object(genai, "Client") as client_factory,
+        ):
+            client_factory.return_value.models.generate_content.return_value = response
+            result = ocr_service.extract_readings(self.image_bytes)
+        self.assertEqual(result["report"]["station_name"], "DEMO STATION")
 
 
 if __name__ == "__main__":

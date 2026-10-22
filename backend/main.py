@@ -3,8 +3,10 @@ from __future__ import annotations
 import io
 import logging
 import os
+from pathlib import Path
 from typing import Annotated, Literal
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image, UnidentifiedImageError
@@ -14,6 +16,11 @@ from ocr_service import OCRConfigurationError, OCRError, extract_readings, is_co
 from report_generator import generate_report
 from validators import validate_report
 
+_DIR = Path(__file__).resolve().parent
+for _cand in (_DIR.parent / ".env", _DIR / ".env", _DIR.parent.parent / ".env"):
+    if _cand.is_file():
+        load_dotenv(_cand, override=False)
+        break
 
 logger = logging.getLogger("kptcl.api")
 MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", str(10 * 1024 * 1024)))
