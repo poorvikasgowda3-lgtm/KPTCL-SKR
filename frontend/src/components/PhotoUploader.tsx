@@ -121,8 +121,11 @@ export default function PhotoUploader({ config, onExtract, onSample, busy }: Pro
       </div>
       {!config?.ocr_configured && (
         <div className="notice notice-info">
-          <strong>Handwriting recognition isn’t configured.</strong>
-          <span>Manual entry and fictional sample mode work without an API key. Configure <code>GEMINI_API_KEY</code> on the backend to use OCR.</span>
+          <strong>Handwriting recognition is not configured.</strong>
+          <span>
+            Set <code>GEMINI_API_KEY</code> in the backend environment to enable recognition, then restart the backend.
+            For the legacy Streamlit app, you can also set the key in Streamlit secrets. You can still edit readings manually or use the fictional sample mode.
+          </span>
         </div>
       )}
       <input
