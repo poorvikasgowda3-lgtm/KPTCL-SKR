@@ -60,17 +60,16 @@ streamlit run app.py
 
 ## Configure OCR securely
 
-The shared OCR adapter uses Google's Gemini API via `google-genai` and defaults to the `gemini-2.5-flash` model. Obtain a key in Google AI Studio. For the current PowerShell process:
+The shared OCR adapter uses Google's Gemini API via `google-genai` and defaults to the `gemini-2.5-flash` model. Obtain a key in Google AI Studio. For local use, copy the example to a Git-ignored root `.env` file and add your private key:
 
 ```powershell
-$env:GEMINI_API_KEY = "your-key"
-$env:GEMINI_MODEL = "gemini-2.5-flash"
-uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
+Copy-Item .env.example .env
+notepad .env
 ```
 
-For deployment, configure `GEMINI_API_KEY` and optional `GEMINI_MODEL` in the backend host's encrypted environment-variable settings. Do not expose the key in React/Vite variables, commit it, or include it in logs. `.env.example` is a reference only; the app does not automatically load a `.env` file.
+Set `GEMINI_API_KEY=your-real-key`, save the file, then restart the backend. The OCR module loads the root `.env` automatically. You may alternatively set `GEMINI_API_KEY` and optional `GEMINI_MODEL` in the backend process environment. For the legacy Streamlit app, Streamlit secrets are also supported. For deployment, use the backend host's encrypted environment-variable settings. Do not expose the key in React/Vite variables, commit it, or include it in logs.
 
-With no key, `/api/config` reports OCR as unconfigured, photo extraction returns a clear `503` response, and manual entry plus fictional sample mode remain available. Gemini pricing, free allowances, regional access, quotas, data handling, and availability can change. Confirm current terms and organizational authorization before sending any operational notebook image to an external service.
+With no key, `/api/config` reports OCR as unconfigured, photo extraction returns a clear `503` response, and manual entry plus fictional sample mode remain available. Once configured, select a photo and press **Read Photo & Extract Readings**. Review the extracted editable fields against the notebook before generating the report. Gemini pricing, free allowances, regional access, quotas, data handling, and availability can change. Confirm current terms and organizational authorization before sending any operational notebook image to an external service.
 
 ## Frontend settings and drafts
 

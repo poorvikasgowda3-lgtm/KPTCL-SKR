@@ -3,11 +3,16 @@ from __future__ import annotations
 import io
 import json
 import os
+from pathlib import Path
 from typing import Any
 
 import cv2
 import numpy as np
 from PIL import Image, ImageOps, UnidentifiedImageError
+from dotenv import load_dotenv
+
+
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 
 class OCRConfigurationError(RuntimeError):

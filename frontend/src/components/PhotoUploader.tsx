@@ -16,6 +16,7 @@ export default function PhotoUploader({ config, onExtract, onSample, busy }: Pro
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState("");
   const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
   const [cameraOpen, setCameraOpen] = useState(false);
 
   useEffect(() => {
@@ -83,6 +84,7 @@ export default function PhotoUploader({ config, onExtract, onSample, busy }: Pro
     if (!next) return;
     if (preview) URL.revokeObjectURL(preview);
     setError("");
+    setSuccess("");
     setFile(next);
     setPreview(URL.createObjectURL(next));
   }
@@ -95,13 +97,16 @@ export default function PhotoUploader({ config, onExtract, onSample, busy }: Pro
     if (cameraRef.current) cameraRef.current.value = "";
     if (galleryRef.current) galleryRef.current.value = "";
     setError("");
+    setSuccess("");
   }
 
   async function extract() {
     if (!file) return;
     setError("");
+    setSuccess("");
     try {
       await onExtract(file);
+      setSuccess("Photo read. Review the extracted readings below, correct anything unclear, then generate the WhatsApp report.");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not extract readings.");
     }
@@ -123,8 +128,7 @@ export default function PhotoUploader({ config, onExtract, onSample, busy }: Pro
         <div className="notice notice-info">
           <strong>Handwriting recognition is not configured.</strong>
           <span>
-            Set <code>GEMINI_API_KEY</code> in the backend environment to enable recognition, then restart the backend.
-            For the legacy Streamlit app, you can also set the key in Streamlit secrets. You can still edit readings manually or use the fictional sample mode.
+            Create a project-root <code>.env</code> file from <code>.env.example</code>, add your private <code>GEMINI_API_KEY</code>, and restart the backend. For the legacy Streamlit app, you can instead set the key in Streamlit secrets. Manual editing and fictional sample mode work without a key.
           </span>
         </div>
       )}
@@ -181,9 +185,10 @@ export default function PhotoUploader({ config, onExtract, onSample, busy }: Pro
         </div>
       )}
       {error && <div className="notice notice-error" role="alert">{error}</div>}
+      {success && <div className="notice notice-success" role="status">{success}</div>}
       {file && (
         <button className="button button-accent extract-button" type="button" disabled={busy} onClick={() => void extract()}>
-          {busy ? <><span className="spinner" /> Reading notebook…</> : "Extract Readings"}
+          {busy ? <><span className="spinner" /> Reading notebook…</> : "Read Photo & Extract Readings"}
         </button>
       )}
       {config?.ocr_configured && !file && <p className="helper-text">Image limit: {maxMb} MB. The photo is processed for extraction, not saved as a draft.</p>}
