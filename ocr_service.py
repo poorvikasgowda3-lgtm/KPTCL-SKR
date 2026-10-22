@@ -23,13 +23,25 @@ class OCRError(RuntimeError):
     """Raised when image extraction fails."""
 
 
+def _usable_api_key(value: str) -> str:
+    key = value.strip()
+    placeholder = key.casefold()
+    if (
+        not key
+        or placeholder in {"your_api_key", "your-gemini-api-key", "changeme", "placeholder"}
+        or placeholder.startswith("replace_with_")
+    ):
+        return ""
+    return key
+
+
 def _api_key() -> str:
-    key = os.environ.get("GEMINI_API_KEY", "").strip()
+    key = _usable_api_key(os.environ.get("GEMINI_API_KEY", ""))
     if not key:
         try:
             import streamlit as st
 
-            key = str(st.secrets.get("GEMINI_API_KEY", "")).strip()
+            key = _usable_api_key(str(st.secrets.get("GEMINI_API_KEY", "")))
         except (ImportError, FileNotFoundError, KeyError):
             key = ""
     return key
@@ -131,6 +143,7 @@ def extract_readings(image_bytes: bytes) -> dict[str, Any]:
         )
     try:
         from google import genai
+        from google.genai import errors
         from google.genai import types
     except ImportError as exc:
         raise OCRError("The Gemini client is not installed. Run: pip install -r requirements.txt") from exc
@@ -183,7 +196,17 @@ Mark uncertain readings in uncertain_fields. Do not infer a date from today's da
         raise
     except json.JSONDecodeError as exc:
         raise OCRError("The vision provider response could not be read. Try reprocessing the photo.") from exc
+    except errors.APIError as exc:
+        if exc.code in (401, 403):
+            message = "Gemini rejected the API credentials or access. Check GEMINI_API_KEY and that the selected model is enabled."
+        elif exc.code == 429:
+            message = "Gemini rate or quota limit reached. Check the project's usage limits, then retry later."
+        elif exc.code >= 500:
+            message = "Gemini is temporarily unavailable. Wait a moment and retry."
+        else:
+            message = f"Gemini rejected the extraction request (HTTP {exc.code}). Check the model configuration and try another clear image."
+        raise OCRError(message) from exc
     except Exception as exc:
-        message = str(exc).strip() or exc.__class__.__name__
-        message = message.replace(api_key, "[redacted]")
-        raise OCRError(f"Vision provider request failed: {message}") from exc
+        raise OCRError(
+            "Could not reach Gemini to read the photo. Check the backend internet connection and retry."
+        ) from exc

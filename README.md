@@ -58,6 +58,18 @@ To continue using the legacy app, start it independently from the project root:
 streamlit run app.py
 ```
 
+## Run with Docker Compose
+
+From the repository root, build the backend and production frontend images and start both services:
+
+```powershell
+docker compose up --build -d
+```
+
+Open `http://localhost:8080`. The frontend container serves the built React app and proxies `/api` requests to FastAPI; port 8000 is not exposed publicly by Compose. Check startup with `docker compose ps` and inspect logs with `docker compose logs -f`. Stop the services with `docker compose down`.
+
+Docker Compose passes a local `.env` to the backend container only; it checks the workspace parent `.env` first and the repository-root `.env` second. To enable Gemini OCR, copy `.env.example` to the repository root (or use the workspace parent `.env`), add your key there, then recreate the backend with `docker compose up -d --force-recreate backend`. No image rebuild is needed for a key change. With neither file containing a usable key, the app stays in manual/sample mode. Never put the key in frontend build variables or commit `.env`.
+
 ## Configure OCR securely
 
 The shared OCR adapter uses Google's Gemini API via `google-genai` and defaults to the `gemini-2.5-flash` model. Obtain a key in Google AI Studio. For local use, copy the example to a Git-ignored root `.env` file and add your private key:
@@ -67,7 +79,7 @@ Copy-Item .env.example .env
 notepad .env
 ```
 
-Set `GEMINI_API_KEY=your-real-key`, save the file, then restart the backend. The OCR module loads the root `.env` automatically. You may alternatively set `GEMINI_API_KEY` and optional `GEMINI_MODEL` in the backend process environment. For the legacy Streamlit app, Streamlit secrets are also supported. For deployment, use the backend host's encrypted environment-variable settings. Do not expose the key in React/Vite variables, commit it, or include it in logs.
+Set `GEMINI_API_KEY=your-real-key`, save the file, then restart the backend. The OCR module loads the app-root `.env` automatically for local Python runs; Docker Compose injects the workspace/repository `.env` into the backend container at runtime. You may alternatively set `GEMINI_API_KEY` and optional `GEMINI_MODEL` in the backend process environment. For the legacy Streamlit app, Streamlit secrets are also supported. For deployment, use the backend host's encrypted environment-variable settings. Do not expose the key in React/Vite variables, commit it, or include it in logs.
 
 With no key, `/api/config` reports OCR as unconfigured, photo extraction returns a clear `503` response, and manual entry plus fictional sample mode remain available. Once configured, select a photo and press **Read Photo & Extract Readings**. Review the extracted editable fields against the notebook before generating the report. Gemini pricing, free allowances, regional access, quotas, data handling, and availability can change. Confirm current terms and organizational authorization before sending any operational notebook image to an external service.
 

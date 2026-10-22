@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 from backend.main import app
-from ocr_service import OCRConfigurationError
+from ocr_service import OCRConfigurationError, is_configured
 
 
 class ApiTests(unittest.TestCase):
@@ -40,6 +40,12 @@ class ApiTests(unittest.TestCase):
             config = self.client.get("/api/config").json()
         self.assertFalse(config["ocr_configured"])
         self.assertNotIn("api_key", config)
+
+    def test_empty_and_placeholder_api_keys_keep_demo_mode_unconfigured(self):
+        placeholders = ("", "replace_with_your_api_key", "YOUR_API_KEY", "your-gemini-api-key", "changeme")
+        for value in placeholders:
+            with self.subTest(value=value), patch.dict("os.environ", {"GEMINI_API_KEY": value}):
+                self.assertFalse(is_configured())
 
     def test_generate_uses_existing_report_formatter(self):
         response = self.client.post("/api/reports/generate", json=self.valid_data)

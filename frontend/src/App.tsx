@@ -65,11 +65,9 @@ export default function App() {
       setData(nextData);
       setOriginalOcr({
         data: nextData,
-        rawText: typeof (extracted as ReportData & { raw_text?: string }).raw_text === "string"
-          ? (extracted as ReportData & { raw_text?: string }).raw_text ?? ""
-          : "",
+        rawText: extracted.raw_text,
       });
-      setIssues(result.warnings as ValidationIssue[]);
+      setIssues(result.warnings);
       setPage("edit");
     } finally {
       setBusy(false);

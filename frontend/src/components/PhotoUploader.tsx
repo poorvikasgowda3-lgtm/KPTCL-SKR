@@ -108,7 +108,8 @@ export default function PhotoUploader({ config, onExtract, onSample, busy }: Pro
       await onExtract(file);
       setSuccess("Photo read. Review the extracted readings below, correct anything unclear, then generate the WhatsApp report.");
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Could not extract readings.");
+      const message = reason instanceof Error ? reason.message : "Could not extract readings.";
+      setError(`${message} No new readings were applied; existing form values were left unchanged.`);
     }
   }
 

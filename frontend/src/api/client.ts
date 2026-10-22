@@ -1,4 +1,13 @@
-import type { AppConfig, GeneratedReport, ReportData } from "../types/report";
+import type {
+  AppConfig,
+  ExtractedInterruption,
+  ExtractedReportData,
+  ExtractedTransformer,
+  GeneratedReport,
+  ReportData,
+  ReportFields,
+  ValidationIssue,
+} from "../types/report";
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "").trim().replace(/\/$/, "");
 
@@ -48,10 +57,66 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const getConfig = () => request<AppConfig>("/api/config");
 
-export async function extractReadings(file: File): Promise<{ data: ReportData; warnings: {level: string; message: string}[] }> {
+type OcrResponse = { data: ExtractedReportData; warnings: ValidationIssue[] };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function requiredStringFields<T extends object>(value: unknown, fields: (keyof T)[]): value is T {
+  return isRecord(value) && fields.every((field) => typeof value[field as string] === "string");
+}
+
+function parseOcrResponse(value: unknown): OcrResponse {
+  const invalid = () => new ApiRequestError(
+    "The OCR service returned incomplete or invalid structured readings. Reprocess the photo or enter the readings manually.",
+  );
+  if (!isRecord(value) || !isRecord(value.data)) throw invalid();
+  const data = value.data;
+  const reportFields: (keyof ReportFields)[] = [
+    "date", "station_name", "peak_load", "peak_load_time",
+    "max_high_voltage", "max_low_voltage", "min_high_voltage",
+    "min_low_voltage", "station_condition", "signature",
+  ];
+  const transformerFields: (keyof ExtractedTransformer)[] = ["rating", "load", "time"];
+  const interruptionFields: (keyof ExtractedInterruption)[] = [
+    "feeder", "start", "end", "reported_duration", "relay", "remarks", "overnight",
+  ];
+  const isTransformer = (item: unknown) => requiredStringFields<ExtractedTransformer>(item, transformerFields);
+  const isInterruption = (item: unknown): item is ExtractedInterruption => {
+    if (!isRecord(item)) return false;
+    const stringFields = interruptionFields.filter((field) => field !== "overnight") as Exclude<
+      keyof ExtractedInterruption,
+      "overnight"
+    >[];
+    const hasOvernightFlag = typeof item.overnight === "boolean";
+    return hasOvernightFlag
+      && requiredStringFields<Omit<ExtractedInterruption, "overnight">>(item, stringFields);
+  };
+  if (
+    !requiredStringFields<ReportFields>(data.report, reportFields)
+    || !Array.isArray(data.transformers) || !data.transformers.every(isTransformer)
+    || !Array.isArray(data.interruptions_66) || !data.interruptions_66.every(isInterruption)
+    || !Array.isArray(data.interruptions_11) || !data.interruptions_11.every(isInterruption)
+    || typeof data.nil_66 !== "boolean" || typeof data.nil_11 !== "boolean"
+    || !Array.isArray(data.uncertain_fields) || !data.uncertain_fields.every((item) => typeof item === "string")
+    || typeof data.raw_text !== "string"
+    || !Array.isArray(value.warnings)
+    || !value.warnings.every((item) =>
+      isRecord(item)
+      && (item.level === "error" || item.level === "warning" || item.level === "info")
+      && typeof item.message === "string")
+  ) {
+    throw invalid();
+  }
+  return value as OcrResponse;
+}
+
+export async function extractReadings(file: File): Promise<OcrResponse> {
   const form = new FormData();
   form.append("image", file);
-  return request("/api/ocr/extract", { method: "POST", body: form });
+  const response = await request<unknown>("/api/ocr/extract", { method: "POST", body: form });
+  return parseOcrResponse(response);
 }
 
 export const generateReport = (report: ReportData) =>

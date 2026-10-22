@@ -40,6 +40,20 @@ export type ReportData = {
   ocr_confirmed: boolean;
 };
 
+export type ExtractedTransformer = Omit<Transformer, "id">;
+export type ExtractedInterruption = Omit<Interruption, "id">;
+
+export type ExtractedReportData = {
+  report: ReportFields;
+  transformers: ExtractedTransformer[];
+  interruptions_66: ExtractedInterruption[];
+  interruptions_11: ExtractedInterruption[];
+  nil_66: boolean;
+  nil_11: boolean;
+  uncertain_fields: string[];
+  raw_text: string;
+};
+
 export type ValidationIssue = {
   level: "error" | "warning" | "info";
   message: string;
