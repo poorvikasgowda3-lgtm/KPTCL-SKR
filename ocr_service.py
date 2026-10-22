@@ -39,21 +39,42 @@ def _usable_api_key(value: Any) -> str:
     return key
 
 
-def _load_env() -> None:
-    """Load project-root .env securely relative to this file."""
+_last_env_mtimes: dict[Path, float] = {}
+
+
+def _get_candidate_env_paths() -> list[Path]:
     base_dir = Path(__file__).resolve().parent
-    candidates = [
+    paths = [
         base_dir / ".env",
         base_dir.parent / ".env",
     ]
-    for env_path in candidates:
+    try:
+        cwd_env = Path.cwd() / ".env"
+        if cwd_env not in paths:
+            paths.append(cwd_env)
+    except Exception:
+        pass
+    return paths
+
+
+def _load_env(force: bool = False) -> None:
+    """Load project-root .env securely relative to this file."""
+    global _last_env_mtimes
+    for env_path in _get_candidate_env_paths():
         if env_path.is_file():
-            load_dotenv(dotenv_path=env_path, override=True)
-            if _usable_api_key(os.environ.get("GEMINI_API_KEY", "")):
-                break
+            try:
+                mtime = env_path.stat().st_mtime
+                prev_mtime = _last_env_mtimes.get(env_path)
+                if force or prev_mtime is None or mtime > prev_mtime:
+                    _last_env_mtimes[env_path] = mtime
+                    load_dotenv(dotenv_path=env_path, override=True)
+                    if _usable_api_key(os.environ.get("GEMINI_API_KEY", "")):
+                        break
+            except OSError:
+                pass
 
 
-_load_env()
+_load_env(force=True)
 
 
 class OCRConfigurationError(RuntimeError):
@@ -64,16 +85,52 @@ class OCRError(RuntimeError):
     """Raised when image extraction fails."""
 
 
+def _read_streamlit_secrets() -> str:
+    """Check Streamlit secrets via st.secrets or direct secrets.toml file."""
+    try:
+        import streamlit as st
+
+        val = _usable_api_key(str(st.secrets.get("GEMINI_API_KEY", "")))
+        if val:
+            return val
+    except Exception:
+        pass
+
+    try:
+        import tomllib
+
+        base_dir = Path(__file__).resolve().parent
+        candidates = [
+            base_dir / ".streamlit" / "secrets.toml",
+            base_dir.parent / ".streamlit" / "secrets.toml",
+            Path.home() / ".streamlit" / "secrets.toml",
+        ]
+        for path in candidates:
+            if path.is_file():
+                data = tomllib.loads(path.read_text(encoding="utf-8"))
+                val = _usable_api_key(str(data.get("GEMINI_API_KEY", "")))
+                if val:
+                    return val
+    except Exception:
+        pass
+    return ""
+
+
 def _api_key() -> str:
     key = _usable_api_key(os.environ.get("GEMINI_API_KEY", ""))
-    if not key:
-        try:
-            import streamlit as st
+    if key:
+        return key
 
-            key = _usable_api_key(str(st.secrets.get("GEMINI_API_KEY", "")))
-        except (ImportError, FileNotFoundError, KeyError, AttributeError):
-            key = ""
-    return key
+    raw = os.environ.get("GEMINI_API_KEY")
+    if raw and not key:
+        return ""
+
+    _load_env(force=False)
+    key = _usable_api_key(os.environ.get("GEMINI_API_KEY", ""))
+    if key:
+        return key
+
+    return _read_streamlit_secrets()
 
 
 def is_configured() -> bool:
@@ -114,48 +171,58 @@ def _normalize_result(payload: dict[str, Any]) -> dict[str, Any]:
         "max_high_voltage", "max_low_voltage", "min_high_voltage",
         "min_low_voltage", "station_condition", "signature",
     )
-    report = {field: _clean_string(raw_report.get(field)) for field in report_fields}
+    report = {
+        field: _clean_string(raw_report.get(field) or payload.get(field))
+        for field in report_fields
+    }
     transformers = []
-    raw_transformers = payload.get("transformers", [])
+    raw_transformers = payload.get("transformers") or payload.get("transformer") or []
     if isinstance(raw_transformers, list):
         for item in raw_transformers:
             if isinstance(item, dict):
                 transformers.append(
                     {
-                        "rating": _clean_string(item.get("rating")),
-                        "load": _clean_string(item.get("load")),
+                        "rating": _clean_string(item.get("rating") or item.get("rating_mva")),
+                        "load": _clean_string(item.get("load") or item.get("load_mw")),
                         "time": _clean_string(item.get("time")),
                     }
                 )
     interruptions: dict[str, list[dict[str, Any]]] = {"66": [], "11": []}
-    raw_interruptions = payload.get("interruptions", {})
+    raw_interruptions = payload.get("interruptions") or payload.get("interruption") or {}
     if isinstance(raw_interruptions, dict):
-        for voltage in interruptions:
-            rows = raw_interruptions.get(voltage, [])
+        for voltage in ("66", "11"):
+            rows = raw_interruptions.get(voltage) or raw_interruptions.get(int(voltage)) or []
             if isinstance(rows, list):
                 for item in rows:
                     if isinstance(item, dict):
                         interruptions[voltage].append(
                             {
-                                "feeder": _clean_string(item.get("feeder")),
-                                "start": _clean_string(item.get("start")),
-                                "end": _clean_string(item.get("end")),
-                                "reported_duration": _clean_string(item.get("reported_duration")),
-                                "relay": _clean_string(item.get("relay")),
-                                "remarks": _clean_string(item.get("remarks")),
+                                "feeder": _clean_string(item.get("feeder") or item.get("feeder_name")),
+                                "start": _clean_string(item.get("start") or item.get("start_time")),
+                                "end": _clean_string(item.get("end") or item.get("end_time")),
+                                "reported_duration": _clean_string(
+                                    item.get("reported_duration") or item.get("duration")
+                                ),
+                                "relay": _clean_string(item.get("relay") or item.get("protection")),
+                                "remarks": _clean_string(item.get("remarks") or item.get("reason")),
                                 "overnight": bool(item.get("overnight", False)),
                             }
                         )
-    uncertain = payload.get("uncertain_fields", [])
+    uncertain = payload.get("uncertain_fields") or payload.get("uncertain") or []
     if not isinstance(uncertain, list):
-        uncertain = []
+        uncertain = [uncertain] if uncertain else []
+
+    nil_66_val = payload.get("nil_66")
+    nil_11_val = payload.get("nil_11")
+    nil_66 = (nil_66_val is True or str(nil_66_val).casefold() == "true") and not interruptions["66"]
+    nil_11 = (nil_11_val is True or str(nil_11_val).casefold() == "true") and not interruptions["11"]
     return {
         "report": report,
         "transformers": transformers or [{"rating": "", "load": "", "time": ""}],
         "interruptions_66": interruptions["66"],
         "interruptions_11": interruptions["11"],
-        "nil_66": payload.get("nil_66") is True and not interruptions["66"],
-        "nil_11": payload.get("nil_11") is True and not interruptions["11"],
+        "nil_66": nil_66,
+        "nil_11": nil_11,
         "uncertain_fields": [_clean_string(field) for field in uncertain if _clean_string(field)],
         "raw_text": _clean_string(payload.get("raw_text")),
     }
